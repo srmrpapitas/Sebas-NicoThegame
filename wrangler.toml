@@ -1,0 +1,9 @@
+name = "sebas-nicothegame"
+pages_build_output_dir = "."
+compatibility_date = "2026-09-01"
+
+# Ranking global (functions/api/scores.js)
+[[d1_databases]]
+binding = "DB"
+database_name = "nicothegame-db"
+database_id = "b6068692-fabb-4e2e-81bb-a080af5cc942"

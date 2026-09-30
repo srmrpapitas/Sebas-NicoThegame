@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#FF8C42" />
 <title>Sebastián Runner — Aventura en Tenerife 3D</title>
+<meta name="description" content="Corre por Tenerife, esquiva cangrejos y entra en el ranking global con tu @ de Instagram. ¿Me superas?">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Sebastián Runner 🌋 ¿Me superas?">
+<meta property="og:description" content="Juego gratis en el navegador. Pon tu @ de Instagram y compite en el ranking global.">
+<meta property="og:image" content="https://sebas-nicothegame.pages.dev/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -310,6 +318,8 @@
     text-shadow:0 2px 6px rgba(0,0,0,.3);
   }
   .loading.hidden{display:none}
+  .loading-bar{width:200px;height:8px;border-radius:99px;background:rgba(255,255,255,.35);margin-top:12px;overflow:hidden}
+  #loadingBarFill{height:100%;width:0;background:#fff;border-radius:99px;transition:width .2s}
 
   /* small tweaks for tiny screens */
   @media (max-height: 640px){
@@ -1491,7 +1501,8 @@
 <!-- Loading -->
 <div id="loading" class="loading">
   <div class="loading-spinner"></div>
-  <div class="loading-text">Cargando Tenerife…</div>
+  <div class="loading-text">Cargando Tenerife… <span id="loadingPct"></span></div>
+  <div class="loading-bar"><div id="loadingBarFill"></div></div>
 </div>
 
 <!-- HUD -->
@@ -1544,7 +1555,7 @@
     <div class="title-pill">🎟️ <span id="titleTickets">0</span></div>
     <div class="title-pill gold">✨ <span id="titleGold">0</span></div>
   </div>
-  <div style="position:absolute;bottom:8px;left:8px;font-size:10px;opacity:.5;color:#fff;font-weight:600">build 2026.05.11-y</div>
+  <div style="position:absolute;bottom:8px;left:8px;font-size:10px;opacity:.5;color:#fff;font-weight:600">build 2026.09.30-ig</div>
 </div>
 
 <!-- How to play -->
@@ -1571,7 +1582,8 @@
     <div class="stat-row"><span class="label">⭐ Puntuación</span><span class="value" id="finalScore">0</span></div>
     <div class="go-buttons">
       <button class="btn-retry" id="retryBtn">🔄 Volver a jugar</button>
-      <button class="btn-share" id="shareBtn">📱 Compartir por WhatsApp</button>
+      <button class="btn-share btn-story" id="storyBtn">📸 Compartir en mi historia</button>
+      <button class="btn-share btn-link" id="shareBtn">🔗 Enviar el juego a un amigo</button>
       <button class="btn-back" id="backBtn">↩ Menú principal</button>
     </div>
   </div>
@@ -1911,6 +1923,8 @@
 <div class="alert-toast" id="alertToast"></div>
 
 <!-- THREE.JS via importmap -->
+<script src="social.js"></script>
+
 <script type="importmap">
 {
   "imports": {
@@ -2021,6 +2035,7 @@ document.getElementById('sebPhoto').src = 'data:image/jpeg;base64,' + window.SEB
   }
   function attach(){
     if(document.body){
+      if(!/[?&]debug=1/.test(location.search)) btn.style.display = 'none';
       document.body.appendChild(btn);
       document.body.appendChild(panel);
     } else {
@@ -2040,21 +2055,52 @@ document.getElementById('sebPhoto').src = 'data:image/jpeg;base64,' + window.SEB
        python3 -m http.server 8000
    then visit  http://localhost:8000/
 =====================================================================*/
-window.__assetsReady = (async () => {
-  const names = [
-    'AVATAR_GLB_B64',
-    'GLB_SEBASTIAN_B64',
-    'GLB_NICO_B64',
-    'LEO_GLB_B64',
-    'RUNNER_GLB_B64',
-    'AUDIO_LAUGH_B64',
-  ];
-  await Promise.all(names.map(async n => {
-    const r = await fetch('assets/' + n + '.b64');
-    if (!r.ok) throw new Error('Failed to load assets/' + n + '.b64: ' + r.status);
-    window[n] = (await r.text()).trim();
-  }));
-  console.log('[lean-build] all assets loaded');
+/* Models are no longer downloaded up front: each character's .glb is
+   fetched only when it is first needed (see fetchGlb in the module).
+   The old assets/*.b64 files are kept only for backwards compatibility. */
+window.__assetsReady = Promise.resolve();
+
+/* fetch() with progress + in-memory cache, shared by every model load.
+   Progress is shown in the main loading screen while it's visible. */
+(function(){
+  const cache = new Map();
+  const inflight = new Map();   // url -> {loaded,total}
+  function paint(){
+    const el = document.getElementById('loadingPct');
+    const bar = document.getElementById('loadingBarFill');
+    if(!el && !bar) return;
+    let l = 0, t = 0;
+    inflight.forEach(v => { l += v.loaded; t += v.total || v.loaded; });
+    const pct = t ? Math.min(99, Math.round(l / t * 100)) : 0;
+    if(el) el.textContent = t ? pct + '%' : '';
+    if(bar) bar.style.width = pct + '%';
+  }
+  window.fetchGlb = function(url){
+    if(cache.has(url)) return cache.get(url);
+    const p = (async () => {
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url);
+      const total = parseInt(r.headers.get('content-length') || '0', 10);
+      if(!r.body || !r.body.getReader){ return await r.arrayBuffer(); }
+      const reader = r.body.getReader();
+      const chunks = []; let loaded = 0;
+      inflight.set(url, { loaded: 0, total });
+      for(;;){
+        const { done, value } = await reader.read();
+        if(done) break;
+        chunks.push(value); loaded += value.length;
+        inflight.set(url, { loaded, total });
+        paint();
+      }
+      inflight.delete(url); paint();
+      const out = new Uint8Array(loaded); let off = 0;
+      for(const c of chunks){ out.set(c, off); off += c.length; }
+      return out.buffer;
+    })();
+    p.catch(() => cache.delete(url));
+    cache.set(url, p);
+    return p;
+  };
 })();
 </script>
 
@@ -2385,7 +2431,7 @@ const bgMusic = {
 
 // Audio "robot" del Ticket Box que suena en el popup de Sebastián cada 10 tickets
 // (debe estar en la misma carpeta como ticketbox.m4a)
-const sebVoice = new Audio('data:audio/mp4;base64,' + window.AUDIO_LAUGH_B64);
+const sebVoice = new Audio('assets/laugh.m4a');
 sebVoice.loop = false;
 sebVoice.volume = 1.0;
 sebVoice.preload = 'auto';
@@ -2620,7 +2666,7 @@ window.__sharpenEnabled = true;
 window.__setSharpen = (on) => { window.__sharpenEnabled = !!on; };
 // Inspector for the on-screen console / debugging on mobile
 window.__getRenderInfo = () => ({
-  build:           '2026.05.11-y',
+  build:           '2026.09.30-ig',
   msaaSamples:     _msaaSamples,
   pixelRatio:      renderer.getPixelRatio(),
   devicePixelRatio:window.devicePixelRatio,
@@ -3289,7 +3335,7 @@ const CHARACTERS = {
   player: {
     name: 'Tú',
     icon: '👤',
-    glbB64: window.AVATAR_GLB_B64,    // tu avatar (primer upload — selfie)
+    glbUrl: 'assets/avatar.glb',    // tu avatar (primer upload — selfie)
     fallbackBuilder: null,
     color: 0xff8c42,
     selectable: true,
@@ -3297,7 +3343,7 @@ const CHARACTERS = {
   sebastian: {
     name: 'Sebastián',
     icon: '🧢',
-    glbB64: window.GLB_SEBASTIAN_B64, // Sebas.glb
+    glbUrl: 'assets/sebastian.glb', // Sebas.glb
     fallbackBuilder: () => buildFallbackPlayer(),
     color: 0xff8c42,
     selectable: true,
@@ -3305,7 +3351,7 @@ const CHARACTERS = {
   nico: {
     name: 'Nico',
     icon: '💼',
-    glbB64: window.GLB_NICO_B64,      // model_2.glb
+    glbUrl: 'assets/nico.glb',      // model_2.glb
     fallbackBuilder: () => buildNicoFallback(),
     color: 0x42b3ff,
     selectable: true,
@@ -3313,7 +3359,7 @@ const CHARACTERS = {
   leo: {
     name: 'Leo',
     icon: '🦁',
-    glbB64: window.LEO_GLB_B64,
+    glbUrl: 'assets/leo.glb',
     fallbackBuilder: null,
     color: 0xffc857,
     selectable: true,
@@ -3331,7 +3377,7 @@ const CHARACTERS = {
   runner: {
     name: 'Corredor',
     icon: '🏃',
-    glbB64: window.RUNNER_GLB_B64,
+    glbUrl: 'assets/runner.glb',
     fallbackBuilder: null,
     color: 0x4ac0a0,
     selectable: false,        // hidden from avatar picker on purpose
@@ -3379,11 +3425,9 @@ let sharedRunClipPromise = null;
 function ensureSharedRunClip(){
   if(sharedRunClip) return Promise.resolve(sharedRunClip);
   if(sharedRunClipPromise) return sharedRunClipPromise;
-  const sourceB64 = window.LEO_GLB_B64 || window.GLB_NICO_B64;
-  if(!sourceB64 || sourceB64.length < 100) return Promise.resolve(null);
-  sharedRunClipPromise = new Promise((resolve) => {
+  sharedRunClipPromise = new Promise(async (resolve) => {
     try{
-      const buf = base64ToArrayBuffer(sourceB64);
+      const buf = await window.fetchGlb(CHARACTERS.leo.glbUrl);
       loader.parse(buf, '', (gltf) => {
         if(gltf.animations && gltf.animations.length > 0){
           sharedRunClip = gltf.animations[0];
@@ -3667,9 +3711,9 @@ function loadCharacter(charKey){
       return;
     }
 
-    if(char.glbB64 && char.glbB64.length > 100){
-      try{
-        const buf = base64ToArrayBuffer(char.glbB64);
+    if(char.glbUrl){
+      (async () => { try{
+        const buf = await window.fetchGlb(char.glbUrl);
         loader.parse(buf, '', async (gltf) => {
           // Pick a clip: prefer the GLB's own animation; fall back to the
           // shared one (which we'll fetch lazily, parsing one of the
@@ -3688,7 +3732,7 @@ function loadCharacter(charKey){
       }catch(e){
         console.warn('GLB load error for', charKey, e);
         installModel(char.fallbackBuilder ? char.fallbackBuilder() : buildFallbackPlayer(), false, null);
-      }
+      } })();
     } else {
       installModel(char.fallbackBuilder ? char.fallbackBuilder() : buildFallbackPlayer(), false, null);
     }
@@ -5379,6 +5423,7 @@ function endGame(quitToMenu){
   }
   // Persist into the offline leaderboard (top 10 by distance and top 10 by score)
   try{ window.__rankingPush && window.__rankingPush(dist, score); }catch(e){}
+  try{ window.__social && window.__social.afterRun({ distance: dist, score, tickets: state.tickets, avatar: currentAvatarKey }); }catch(e){ console.warn(e); }
   gameOverScreen.classList.add('show');
 }
 
@@ -5390,7 +5435,11 @@ pauseBtn.addEventListener('click', () => { if(state.paused) resumeGame(); else p
 resumeBtn.addEventListener('click', resumeGame);
 quitBtn.addEventListener('click', () => { resumeGame(); endGame(true); });
 
-playBtn.addEventListener('click', () => { getAudio(); bgMusic.load(); sebVoice.load(); startGame(); });
+playBtn.addEventListener('click', async () => {
+  getAudio(); bgMusic.load(); sebVoice.load();
+  if(window.__ig) await window.__ig.ensure('Pon tu @ de Instagram para competir en el ranking global contra los demás seguidores.');
+  startGame();
+});
 howBtn.addEventListener('click', () => howModal.classList.add('show'));
 howCloseBtn.addEventListener('click', () => howModal.classList.remove('show'));
 
@@ -5400,9 +5449,12 @@ jumpBtn.addEventListener('click', jump);
 retryBtn.addEventListener('click', () => { gameOverScreen.classList.remove('show'); startGame(); });
 backBtn.addEventListener('click', () => { gameOverScreen.classList.remove('show'); titleScreen.style.display = 'flex'; });
 
+document.getElementById('storyBtn').addEventListener('click', () => {
+  window.__social && window.__social.shareStory();
+});
 shareBtn.addEventListener('click', () => {
   const txt = '¡He hecho ' + Math.floor(state.distance) + 'm y recogí ' + state.tickets + ' tickets en Sebastián Runner! 🎟️🌋 ¿Lo superas?';
-  const url = window.location.href;
+  const url = (window.__social && window.__social.gameUrl) || window.location.href;
   if(navigator.share){
     navigator.share({title:'Sebastián Runner', text:txt, url}).catch(()=>{});
   } else {
@@ -5782,7 +5834,15 @@ window.addEventListener('resize', () => {
   }
   window.__rankingPush = pushEntry;   // exposed so endGame can call it
 
-  function render(){
+  async function render(){
+    const tab = currentTab;
+    if(window.__social){
+      const ok = await window.__social.renderRanking(rankingList, tab);
+      if(ok || tab !== currentTab) return;
+    }
+    renderLocal();
+  }
+  function renderLocal(){
     const data = load();
     const list = data[currentTab] || [];
     rankingList.innerHTML = '';
@@ -5821,13 +5881,8 @@ window.addEventListener('resize', () => {
     });
   });
   rankingBtn.addEventListener('click', () => {
-    // Ask for a name once (if not set yet) so the entries are personalised
-    if(!localStorage.getItem('sebRunnerName')){
-      const n = (prompt('¿Cómo te llamas para el ranking?', '') || '').trim();
-      if(n) localStorage.setItem('sebRunnerName', n.slice(0, 16));
-    }
-    render();
     rankingModal.classList.add('show');
+    render();
   });
   rankingCloseBtn.addEventListener('click', () => rankingModal.classList.remove('show'));
   rankingModal.addEventListener('click', e => {
@@ -7636,9 +7691,9 @@ window.addEventListener('resize', () => {
     fightBtn.classList.remove('active');
     // Ask for a player name on first entry (used by ranking AND multiplayer
     // so other people see who you are). It's saved permanently.
-    if(!localStorage.getItem('sebRunnerName')){
-      const n = (prompt('¿Cómo te llamas? (lo verán los demás jugadores)', '') || '').trim();
-      if(n) localStorage.setItem('sebRunnerName', n.slice(0, 16));
+    if(!localStorage.getItem('sebRunnerName') && window.__ig){
+      await window.__ig.ensure('Pon tu @ de Instagram: es el nombre que verán los demás jugadores en Tenerife.');
+      if(!localStorage.getItem('sebRunnerName')) localStorage.setItem('sebRunnerName', 'Jugador');
     }
     // Hide other screens
     titleScreen.style.display = 'none';

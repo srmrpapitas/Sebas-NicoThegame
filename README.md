@@ -1,6 +1,6 @@
 # 🌋 Sebastián Runner
 
-> **Build actual:** `2026.05.11-o` · Juego web 3D escrito en un único `index.html` con Three.js + WebRTC.
+> **Build actual:** `2026.09.30-ig` · Juego web 3D escrito en un único `index.html` con Three.js + WebRTC.
 
 Aventura en Tenerife. Corre por la playa esquivando cangrejos, prueba suerte en el casino, explora el mundo abierto y sube *skills* al estilo RuneScape — todo desde el navegador, sin instalación.
 
@@ -140,6 +140,13 @@ window.__refreshCombatRail();
 ---
 
 ## 🆕 Cambios recientes
+
+### `2026.09.30-ig` — versión para seguidores de Instagram
+- 📸 **@ de Instagram**: al jugar por primera vez se pide el @ (se puede saltar). Sustituye a los `prompt()`.
+- 🌍 **Ranking global** en Cloudflare D1 (`nicothegame-db`) vía Pages Function `functions/api/scores.js`. Guarda la mejor marca de cada @ en distancia y puntos. Si la API falla, se muestra el ranking local.
+- 📲 **Compartir en historia**: al acabar genera una imagen 1080×1920 con tu marca, tu @ y tu puesto.
+- ⚡ **Carga rápida**: los modelos se cargan como `.glb` binarios y solo cuando hacen falta (antes ~17 MB de base64 al arrancar). Barra de progreso en la pantalla de carga.
+- 🔗 Vista previa del enlace (`og.jpg`) para bio y DMs. El botón 🐞 solo aparece con `?debug=1`.
 
 ### `2026.05.11-o`
 - 🐛 **Bugfix crítico:** declarada la constante `SANDBOX_UNLOCK_GOLD` que faltaba — el sandbox dejaba de cargar en pantalla "Cargando Tenerife…". Valor actual: `0` (sandbox abierto desde el principio). Sube este número en `index.html` para gatear el sandbox tras X ✨ oro.
